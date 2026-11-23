@@ -97,7 +97,48 @@ answer as an error. The library then catches it and treats the room as
 unencrypted. It stores a result only for encrypted rooms, so the check repeats
 for every message.
 
-The lines at room creation probably have the same cause, or similar checks for
-room names and avatars that are not set yet. This was not traced request by
-request. Every reply in the log was delivered, so the lines do not block
-delivery.
+A debug capture on 2026-11-23 confirmed this for one reply in a project room:
+
+```
+(REQ-36) GET  /_matrix/client/v3/rooms/!…/state/m.room.encryption/
+(REQ-36) {"errcode":"M_NOT_FOUND","error":"Event not found."}
+(REQ-37) PUT  /_matrix/client/v3/rooms/!…/send/m.room.message/…
+```
+
+The send in REQ-37 follows the error, and the reply arrived in Element. The
+only cost is one extra request to the home server for each bot message.
+
+The lines at room creation were not captured. They probably have the same
+cause, or come from similar checks for room names and avatars that are not
+set yet.
+
+### Capture the requests again
+
+The library filters its own debug lines, so `--level debug` alone does not
+show request URLs. To see them:
+
+1. Create `/tmp/sdk-debug.cjs`:
+
+   ```js
+   const sdk = require("/home/marcos/.local/lib/node_modules/pi-courier/node_modules/matrix-bot-sdk");
+   sdk.LogService.setLevel(sdk.LogLevel.DEBUG);
+   ```
+
+2. Create `~/.config/systemd/user/pi-courier.service.d/sdk-debug.conf`:
+
+   ```ini
+   [Service]
+   ExecStart=
+   ExecStart=/home/marcos/.local/opt/node-24/bin/node /home/marcos/.local/lib/node_modules/pi-courier/dist/standalone.js --level debug
+   Environment=NODE_OPTIONS=--require=/tmp/sdk-debug.cjs
+   ```
+
+3. Run `systemctl --user daemon-reload && systemctl --user restart pi-courier`.
+4. Send a message in a project room, then read the request before each error:
+
+   ```sh
+   journalctl --user -u pi-courier --since -5min -o cat | grep -B2 M_NOT_FOUND
+   ```
+
+5. Delete both files and run step 3 again. Debug output includes message
+   text, so do not leave it on.
